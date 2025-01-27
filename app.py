@@ -1,241 +1,271 @@
+
 import pygame
 import numpy as np
 import pyaudio
-import random
-import math
-
-# Initialize Pygame
-pygame.init()
-
-# Get screen dimensions
-screen_info = pygame.display.Info()
-WIDTH, HEIGHT = screen_info.current_w, screen_info.current_h
-
-# Create window
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.FULLSCREEN)
-pygame.display.set_caption("Interactive Sonic Realm")
-
-# Advanced Color Palette
-COLORS = [
-    (63, 81, 181),    # Deep Blue
-    (0, 150, 136),    # Teal
-    (233, 30, 99),    # Pink
-    (255, 152, 0),    # Orange
-    (156, 39, 176),   # Purple
-    (76, 175, 80),    # Green
-    (255, 87, 34)     # Deep Orange
-]
-
-# Background Options
-BACKGROUNDS = [
-    "gradient",  # Smooth gradient
-    "particles",  # Particle-based background
-    "solid"  # Solid color background
-]
-current_background = 0  # Start with gradient
-
-class AdvancedParticleSystem:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-        self.particles = []
-        self.center_attractor = {
-            'x': width // 2,
-            'y': height // 2,
-            'strength': 0
-        }
-
-    def create_particles(self, amplitude):
-        if random.random() < amplitude:
-            num_particles = int(amplitude * 100)
-            for _ in range(num_particles):
-                self.particles.append({
-                    'x': random.randint(0, self.width),
-                    'y': random.randint(0, self.height),
-                    'vx': random.uniform(-2, 2),
-                    'vy': random.uniform(-2, 2),
-                    'color': random.choice(COLORS),
-                    'size': random.uniform(2, 6),
-                    'lifetime': random.uniform(30, 90),
-                    'phase': random.uniform(0, 2 * math.pi),
-                    'wave_amplitude': random.uniform(1, 3)
-                })
-
-    def update_particles(self, amplitude):
-        self.center_attractor['strength'] = amplitude * 5
-        for particle in self.particles[:]:
-            dx = self.center_attractor['x'] - particle['x']
-            dy = self.center_attractor['y'] - particle['y']
-            distance = math.sqrt(dx**2 + dy**2)
-            
-            particle['phase'] += 0.1
-            wave_x = math.sin(particle['phase']) * particle['wave_amplitude']
-            wave_y = math.cos(particle['phase']) * particle['wave_amplitude']
-            
-            if distance > 0:
-                attraction_factor = self.center_attractor['strength'] / distance
-                particle['vx'] += dx / distance * attraction_factor + wave_x
-                particle['vy'] += dy / distance * attraction_factor + wave_y
-            
-            particle['vx'] += random.uniform(-0.5, 0.5)
-            particle['vy'] += random.uniform(-0.5, 0.5)
-            
-            particle['x'] += particle['vx']
-            particle['y'] += particle['vy']
-            
-            particle['x'] = particle['x'] % self.width
-            particle['y'] = particle['y'] % self.height
-            
-            particle['lifetime'] -= 1
-            
-            if particle['lifetime'] <= 0:
-                self.particles.remove(particle)
-
-    def render_particles(self, screen):
-        for particle in self.particles:
-            for i in range(3):
-                glow_surface = pygame.Surface((particle['size'] * (3 - i), 
-                                               particle['size'] * (3 - i)), 
-                                              pygame.SRCALPHA)
-                glow_color = particle['color'] + (50 - i * 15,)
-                pygame.draw.circle(
-                    glow_surface, 
-                    glow_color, 
-                    (int(glow_surface.get_width() // 2), 
-                     int(glow_surface.get_height() // 2)), 
-                    int(glow_surface.get_width() // 2)
-                )
-                screen.blit(
-                    glow_surface, 
-                    (particle['x'] - glow_surface.get_width() // 2, 
-                     particle['y'] - glow_surface.get_height() // 2)
-                )
+import colorsys
 
 class MusicVisualizer:
     def __init__(self):
-        # Audio Setup
-        self.pyaudio = pyaudio.PyAudio()
-        self.stream = self.pyaudio.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=44100,
+        pygame.init()
+        
+        # Window settings
+        self.display_info = pygame.display.Info()
+        self.WIDTH = 800
+        self.HEIGHT = 600
+        self.fullscreen = False
+        self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT), pygame.RESIZABLE)
+        pygame.display.set_caption("Music Visualizer")
+        
+        # Audio settings
+
+
+        self.CHUNK = 1025
+        self.FORMAT = pyaudio.paFloat32
+        self.CHANNELS = 1
+        self.RATE = 44100
+        
+        # Initialize PyAudio
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open(
+            format=self.FORMAT,
+            channels=self.CHANNELS,
+            rate=self.RATE,
             input=True,
-            frames_per_buffer=1024
-        )
-
-        # Visualization Parameters
-        self.bars = 52
-        self.bar_width = WIDTH // self.bars
-        self.smooth_data = [0] * self.bars
-        
-        # Particle System
-        self.particle_system = AdvancedParticleSystem(WIDTH, HEIGHT)
-
-    def get_frequency_data(self):
-        data = np.frombuffer(self.stream.read(1024), dtype=np.int16)
-        windowed_data = data * np.hanning(len(data))
-        fft_data = np.abs(np.fft.fft(windowed_data)[:512])
-        fft_data = fft_data / np.max(fft_data)
-        
-        downsampled = np.interp(
-            np.linspace(0, len(fft_data), self.bars), 
-            range(len(fft_data)), 
-            fft_data
+            frames_per_buffer=self.CHUNK
         )
         
-        return downsampled
+        # Visualization settings
+        self.params = {
+            'sensitivity': 15.0,
+            'bar_width': 6,  # Decreased bar width
+            'show_peaks': True,
+            'color_hue': 0.5  # Initial color hue for the bars
+        }
+        
+        self.BAR_COUNT = self.WIDTH // (self.params['bar_width'] + 2)
+        self.prev_heights = np.ones(self.BAR_COUNT) * (self.HEIGHT // 4)  # Start at a quarter height
+        self.peak_heights = np.zeros(self.BAR_COUNT)
+    
+    def update_dimensions(self, width, height):
+        self.WIDTH = width
+        self.HEIGHT = height
+        self.BAR_COUNT = self.WIDTH // (self.params['bar_width'] + 2)
+        self.prev_heights = np.ones(self.BAR_COUNT) * (self.HEIGHT // 4)
+        self.peak_heights = np.zeros(self.BAR_COUNT)
+    
+    def get_audio_data(self):
+        try:
+            data = self.stream.read(self.CHUNK, exception_on_overflow=False)
+            audio_data = np.frombuffer(data, dtype=np.float32)
+            
+            # Take absolute value to get magnitude
+            audio_data = np.abs(audio_data)
+            
+            # Perform FFT
+            fft_data = np.abs(np.fft.fft(audio_data)[:self.CHUNK//2])
+            
+            # Apply logarithmic scaling to better represent audio frequencies
+            fft_data = np.log10(fft_data + 1)
+            
+            # Normalize the data
+            fft_data = fft_data / (np.max(fft_data) + 1e-10)
+            
+            # Create frequency bins
+            bins = np.array_split(fft_data, self.BAR_COUNT)
+            bar_values = [np.mean(bin) for bin in bins]
+            
+            # Additional scaling to make the visualization more responsive
+            bar_values = np.array(bar_values) * 2.0
+            
+            return bar_values
+            
+        except Exception as e:
+            print(f"Audio error: {e}")
+            return np.zeros(self.BAR_COUNT)
+    
+    def draw_gradient_background(self, audio_data):
+        # Generate a cool gradient background based on the bass
+        bass = np.mean(audio_data[:5]) if len(audio_data) > 5 else 0
+        hue = (self.params['color_hue'] + bass * 0.2) % 1.0
+        saturation = 0.7 + min(0.2, bass * 0.5)
+        value = 0.4 + min(0.3, bass * 0.3)
 
-    def render_background(self, amplitude):
-        global current_background
-        if BACKGROUNDS[current_background] == "gradient":
-            # Gradient background
-            for y in range(HEIGHT):
-                r = int(10 + amplitude * 50 * (y / HEIGHT))
-                g = int(10 + amplitude * 30 * (y / HEIGHT))
-                b = int(20 + amplitude * 40 * (y / HEIGHT))
-                pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
-        elif BACKGROUNDS[current_background] == "particles":
-            # Particle-based background
-            self.particle_system.render_particles(screen)
-        elif BACKGROUNDS[current_background] == "solid":
-            # Solid color background
-            screen.fill((10, 10, 20))
+        # Create color gradients
+        top_color = colorsys.hsv_to_rgb(hue, saturation, value)
+        bottom_color = colorsys.hsv_to_rgb((hue + 0.1) % 1.0, saturation, value)
 
-    def render_amplifier_ui(self, amplitude, freq_data):
-        # Amplifier-like UI
-        ui_width = 300
-        ui_height = 200
-        ui_x = WIDTH - ui_width - 20
-        ui_y = HEIGHT - ui_height - 20
-
-        # Draw amplifier box
-        pygame.draw.rect(screen, (50, 50, 50), (ui_x, ui_y, ui_width, ui_height), border_radius=10)
-        pygame.draw.rect(screen, (30, 30, 30), (ui_x + 5, ui_y + 5, ui_width - 10, ui_height - 10), border_radius=8)
-
-        # Draw amplitude meter
-        meter_height = int(amplitude * 100)
-        pygame.draw.rect(screen, (0, 255, 0), (ui_x + 20, ui_y + ui_height - 20 - meter_height, 20, meter_height))
-
-        # Draw frequency peaks
-        for i, magnitude in enumerate(freq_data[:10]):
-            peak_height = int(magnitude * 50)
-            pygame.draw.rect(screen, (255, 0, 0), (ui_x + 60 + i * 20, ui_y + ui_height - 20 - peak_height, 10, peak_height))
-
-        # Draw labels
-        font = pygame.font.SysFont("Arial", 16)
-        label = font.render("Amplifier", True, (255, 255, 255))
-        screen.blit(label, (ui_x + 20, ui_y + 10))
-
-    def render(self, freq_data, amplitude):
-        # Render background
-        self.render_background(amplitude)
-
-        # Render frequency bars
-        for i, magnitude in enumerate(freq_data):
-            bar_height = int(magnitude * HEIGHT * 2)
-            color = COLORS[i % len(COLORS)]
-            bar_surface = pygame.Surface((self.bar_width, bar_height), pygame.SRCALPHA)
-            bar_surface.fill(color + (100,))
-            screen.blit(bar_surface, (i * self.bar_width, HEIGHT - bar_height))
-
-        # Render amplifier UI
-        self.render_amplifier_ui(amplitude, freq_data)
-
+        # Convert to RGB values (scaled to 255)
+        top_color = tuple(int(c * 255) for c in top_color)
+        bottom_color = tuple(int(c * 255) for c in bottom_color)
+        
+        # Draw gradient background
+        for y in range(self.HEIGHT):
+            ratio = y / self.HEIGHT
+            r = int(top_color[0] * (1 - ratio) + bottom_color[0] * ratio)
+            g = int(top_color[1] * (1 - ratio) + bottom_color[1] * ratio)
+            b = int(top_color[2] * (1 - ratio) + bottom_color[2] * ratio)
+            pygame.draw.line(self.screen, (r, g, b), (0, y), (self.WIDTH, y))
+    
+    def draw_visualizer(self, audio_data):
+        # Calculate bass for background pulse
+        bass = np.mean(audio_data[:5]) if len(audio_data) > 5 else 0
+        
+        # Draw bars with a smoother, cooler look
+        min_height = 20  # Minimum height to prevent bars from shrinking to zero
+        for i, amplitude in enumerate(audio_data):
+            # Smooth transitions
+            self.prev_heights[i] = self.prev_heights[i] * 0.7 + amplitude * 0.3
+            
+            # Calculate bar height with improved scaling
+            height = int(self.prev_heights[i] * self.HEIGHT * self.params['sensitivity'] / 15.0)
+            
+            # Prevent bars from going too small (minimum height)
+            height = max(min_height, height)
+            
+            # Calculate position
+            x = i * (self.params['bar_width'] + 2) + 10
+            y = self.HEIGHT - height - 10
+            
+            # Smooth color transition based on the color_hue parameter
+            hue = (self.params['color_hue'] + i/self.BAR_COUNT + bass * 0.2) % 1.0
+            sat = 0.8 + min(0.2, amplitude * 0.5)  # Increase saturation with amplitude
+            val = 0.9 + min(0.1, amplitude * 0.3)  # Increase brightness with amplitude
+            rgb = colorsys.hsv_to_rgb(hue, sat, val)
+            color = tuple(int(c * 255) for c in rgb)
+            
+            # Draw bar with rounded corners and a gradient
+            pygame.draw.rect(self.screen, color,
+                           (x, y, self.params['bar_width'], height),
+                           border_radius=5)
+            
+            # Update and draw peaks
+            if self.params['show_peaks']:
+                self.peak_heights[i] = max(height, self.peak_heights[i] * 0.95)
+                peak_y = self.HEIGHT - self.peak_heights[i] - 10
+                peak_y = max(10, peak_y)  # Prevent peaks from going off screen
+                pygame.draw.rect(self.screen, (255, 255, 255),
+                               (x, peak_y, self.params['bar_width'], 2))
+    
+    def draw_slider(self):
+        # Slider for controlling sensitivity inside a box
+        box_x = self.WIDTH - 210
+        box_y = self.HEIGHT - 150
+        box_width = 180
+        box_height = 120
+        
+        # Draw box background with rounded corners
+        pygame.draw.rect(self.screen, (50, 50, 50), (box_x, box_y, box_width, box_height), border_radius=15)
+        
+        # Slider for controlling sensitivity
+        slider_x = box_x + 10
+        slider_y = box_y + 40
+        slider_width = box_width - 20
+        slider_height = 10
+        slider_position = (self.params['sensitivity'] - 1.0) / 29.0 * slider_width + slider_x
+        
+        # Draw slider background
+        pygame.draw.rect(self.screen, (100, 100, 100), (slider_x, slider_y, slider_width, slider_height))
+        
+        # Draw the slider handle
+        pygame.draw.circle(self.screen, (255, 0, 0), (int(slider_position), slider_y + slider_height // 2), 10)
+    
+    def draw_color_slider(self):
+        # Slider for controlling the color hue of the bars inside the same box
+        slider_x = self.WIDTH - 210 + 10
+        slider_y = self.HEIGHT - 150 + 70
+        slider_width = 160
+        slider_height = 10
+        slider_position = self.params['color_hue'] * slider_width + slider_x
+        
+        # Draw color slider background
+        pygame.draw.rect(self.screen, (100, 100, 100), (slider_x, slider_y, slider_width, slider_height))
+        
+        # Draw the slider handle
+        pygame.draw.circle(self.screen, (255, 255, 255), (int(slider_position), slider_y + slider_height // 2), 10)
+    
     def run(self):
-        global current_background
         clock = pygame.time.Clock()
         running = True
-
+        dragging_slider = False
+        dragging_color_slider = False
+        
         while running:
             for event in pygame.event.get():
-                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_b:  # Change background on 'B' key press
-                        current_background = (current_background + 1) % len(BACKGROUNDS)
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_f:
+                        self.fullscreen = not self.fullscreen
+                        if self.fullscreen:
+                            self.screen = pygame.display.set_mode(
+                                (self.display_info.current_w, self.display_info.current_h),
+                                pygame.FULLSCREEN)
+                            self.update_dimensions(self.display_info.current_w, 
+                                                 self.display_info.current_h)
+                        else:
+                            self.screen = pygame.display.set_mode((800, 600), 
+                                                                pygame.RESIZABLE)
+                            self.update_dimensions(800, 600)
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Left mouse button
+                        slider_x = self.WIDTH - 210 + 10
+                        slider_y = self.HEIGHT - 150 + 40
+                        slider_width = 160
+                        if slider_x <= event.pos[0] <= slider_x + slider_width and slider_y - 10 <= event.pos[1] <= slider_y + 20:
+                            dragging_slider = True
+                            self.update_sensitivity(event.pos[0], slider_x, slider_width)
+                        color_slider_x = self.WIDTH - 210 + 10
+                        color_slider_y = self.HEIGHT - 150 + 70
+                        if color_slider_x <= event.pos[0] <= color_slider_x + slider_width and color_slider_y - 10 <= event.pos[1] <= color_slider_y + 20:
+                            dragging_color_slider = True
+                            self.update_color_hue(event.pos[0], color_slider_x, slider_width)
+                elif event.type == pygame.MOUSEMOTION:
+                    if dragging_slider:
+                        self.update_sensitivity(event.pos[0], self.WIDTH - 210 + 10, 160)
+                    if dragging_color_slider:
+                        self.update_color_hue(event.pos[0], self.WIDTH - 210 + 10, 160)
+                elif event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1:
+                        dragging_slider = False
+                        dragging_color_slider = False
+                elif event.type == pygame.VIDEORESIZE and not self.fullscreen:
+                    self.update_dimensions(event.w, event.h)
+            
+            self.screen.fill((0, 0, 0))  # Clear screen
+            
+            # Get audio data and update visualization
+            audio_data = self.get_audio_data()
+            
+            # Draw gradient background
+            self.draw_gradient_background(audio_data)
+            
+            # Draw visualizer
+            self.draw_visualizer(audio_data)
+            self.draw_slider()
+            self.draw_color_slider()
+            
+            pygame.display.flip()  # Update the screen
+            clock.tick(60)  # Limit to 60 FPS
 
-            # Get frequency data
-            freq_data = self.get_frequency_data()
-            amplitude = np.mean(freq_data)
-
-            # Generate and update particles
-            self.particle_system.create_particles(amplitude)
-            self.particle_system.update_particles(amplitude)
-
-            # Render visualization
-            self.render(freq_data, amplitude)
-
-            # Update display
-            pygame.display.flip()
-            clock.tick(60)
-
-        # Cleanup
-        self.stream.stop_stream()
-        self.stream.close()
-        self.pyaudio.terminate()
         pygame.quit()
 
-# Run the visualizer
+    def update_sensitivity(self, x_pos, slider_x, slider_width):
+        self.params['sensitivity'] = ((x_pos - slider_x) / slider_width) * 30.0 + 1.0
+        self.params['sensitivity'] = min(max(self.params['sensitivity'], 1.0), 30.0)
+    
+    def update_color_hue(self, x_pos, slider_x, slider_width):
+        self.params['color_hue'] = (x_pos - slider_x) / slider_width
+        self.params['color_hue'] = min(max(self.params['color_hue'], 0.0), 1.0)
+
+# Running the visualizer
 if __name__ == "__main__":
     visualizer = MusicVisualizer()
     visualizer.run()
+
+
+ 
+      
+
+     
